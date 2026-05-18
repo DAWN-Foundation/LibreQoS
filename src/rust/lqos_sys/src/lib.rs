@@ -20,6 +20,7 @@ pub mod flowbee_data;
 mod garbage_collector;
 mod ip_mapping;
 mod kernel_wrapper;
+mod libxdp;
 mod linux;
 mod lqos_kernel;
 mod throughput;

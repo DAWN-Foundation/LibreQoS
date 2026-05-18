@@ -180,6 +180,18 @@ pub struct Config {
     /// Enable per-ASN TemporalHeatmap collection.
     #[serde(default = "default_true")]
     pub enable_asn_heatmaps: bool,
+
+    /// How the XDP program is attached to network interfaces.
+    ///
+    /// * `Raw` (default): direct `bpf_xdp_attach()` — historical behavior, the
+    ///   XDP program owns the interface exclusively.
+    /// * `Libxdp { priority }`: attach via the `libxdp` dispatcher to compose
+    ///   with other XDP programs (e.g., DSCP markers, observability probes).
+    ///
+    /// Older configs without this field deserialize as `Raw`, preserving
+    /// existing behavior bit-for-bit.
+    #[serde(default)]
+    pub xdp_attach_mode: super::xdp_attach_mode::XdpAttachMode,
 }
 
 impl Config {
@@ -322,6 +334,7 @@ impl Default for Config {
             enable_circuit_heatmaps: true,
             enable_site_heatmaps: true,
             enable_asn_heatmaps: true,
+            xdp_attach_mode: super::xdp_attach_mode::XdpAttachMode::default(),
         }
     }
 }

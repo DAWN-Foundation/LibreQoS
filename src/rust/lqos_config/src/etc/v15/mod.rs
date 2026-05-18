@@ -20,6 +20,7 @@ mod tuning;
 mod uisp_integration;
 mod visp_integration;
 mod wispgate;
+mod xdp_attach_mode;
 
 pub use bridge::*;
 pub use long_term_stats::LongTermStats;
@@ -30,3 +31,4 @@ pub use treeguard::{
     TreeguardLinksConfig, TreeguardQooConfig,
 };
 pub use tuning::Tunables;
+pub use xdp_attach_mode::{DEFAULT_LIBXDP_PRIORITY, XdpAttachMode};

@@ -25,10 +25,11 @@ pub use cpu_topology::{
     CpuListParseError, ShapingCpuDetection, ShapingCpuSource, detect_shaping_cpus,
 };
 pub use etc::{
-    BridgeConfig, Config, LazyQueueMode, QueueMode, RttThresholds, SingleInterfaceConfig,
-    StormguardConfig, StormguardStrategy, TreeguardCircuitsConfig, TreeguardConfig,
-    TreeguardCpuConfig, TreeguardCpuMode, TreeguardLinksConfig, TreeguardQooConfig, Tunables,
-    clear_cached_config, disable_xdp_bridge, enable_long_term_stats, load_config,
+    BridgeConfig, Config, DEFAULT_LIBXDP_PRIORITY, LazyQueueMode, QueueMode, RttThresholds,
+    SingleInterfaceConfig, StormguardConfig, StormguardStrategy, TreeguardCircuitsConfig,
+    TreeguardConfig, TreeguardCpuConfig, TreeguardCpuMode, TreeguardLinksConfig,
+    TreeguardQooConfig, Tunables, XdpAttachMode, clear_cached_config, disable_xdp_bridge,
+    enable_long_term_stats, load_config, override_cached_config,
     treeguard_cpu_mode_migration_notice, update_config,
 };
 pub use network_json::{NetworkJson, NetworkJsonNode, NetworkJsonTransport};

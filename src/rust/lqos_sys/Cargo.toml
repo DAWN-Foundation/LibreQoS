@@ -7,6 +7,7 @@ license = "GPL-2.0-only"
 [dependencies]
 nix = {  workspace = true }
 libbpf-sys = "1"
+libxdp-sys = { version = "0.2", features = ["vendored", "use_cc_build"] }
 anyhow = { workspace = true }
 lqos_bus = { path = "../lqos_bus" }
 lqos_config = { path = "../lqos_config" }

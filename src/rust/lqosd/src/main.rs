@@ -153,6 +153,27 @@ fn normalize_mapping_request(
     Ok((base_tc_handle, base_cpu, false))
 }
 
+/// Parse the optional `--xdp-attach-mode={raw|libxdp|libxdp:<priority>}` CLI flag.
+///
+/// Returns `Ok(Some(mode))` if the flag was present, `Ok(None)` if absent,
+/// `Err(msg)` if present but malformed. On error, the caller prints to stderr
+/// and exits cleanly — no silent fallback.
+fn parse_xdp_attach_mode_arg() -> Result<Option<lqos_config::XdpAttachMode>, String> {
+    let args: Vec<String> = std::env::args().collect();
+    for (i, a) in args.iter().enumerate() {
+        if let Some(rest) = a.strip_prefix("--xdp-attach-mode=") {
+            return lqos_config::XdpAttachMode::parse_cli(rest).map(Some);
+        }
+        if a == "--xdp-attach-mode" {
+            let val = args.get(i + 1).ok_or_else(|| {
+                "--xdp-attach-mode requires a value (raw | libxdp | libxdp:<priority>)".to_string()
+            })?;
+            return lqos_config::XdpAttachMode::parse_cli(val).map(Some);
+        }
+    }
+    Ok(None)
+}
+
 fn main() -> Result<()> {
     // Set up logging
     set_console_logging()?;
@@ -166,6 +187,16 @@ fn main() -> Result<()> {
             std::env::set_var("RES_OPTIONS", "timeout:2 attempts:1");
         }
     }
+
+    // Parse the CLI override BEFORE first config load — if the flag is
+    // malformed, we exit before doing anything destructive.
+    let cli_xdp_attach_mode = match parse_xdp_attach_mode_arg() {
+        Ok(opt) => opt,
+        Err(msg) => {
+            eprintln!("lqosd: {msg}");
+            std::process::exit(2);
+        }
+    };
 
     // Check that the file lock is available. Bail out if it isn't.
     let file_lock = FileLock::new().inspect_err(|e| {
@@ -181,6 +212,20 @@ fn main() -> Result<()> {
 
     // Load config
     let config = lqos_config::load_config()?;
+
+    // Apply CLI override to the cached config (in-memory only — does not
+    // touch /etc/lqos.conf). All downstream callers that re-load the config
+    // (including the XDP attach dispatch in lqos_sys) will see the overridden
+    // value.
+    let config = if let Some(mode) = cli_xdp_attach_mode {
+        info!("CLI override: xdp_attach_mode = {:?}", mode);
+        let mut overridden = (*config).clone();
+        overridden.xdp_attach_mode = mode;
+        lqos_config::override_cached_config(overridden.clone());
+        std::sync::Arc::new(overridden)
+    } else {
+        config
+    };
     let stick_offset = stick::recompute_stick_offset(&config)?;
 
     ensure_rustls_crypto_provider()?;
