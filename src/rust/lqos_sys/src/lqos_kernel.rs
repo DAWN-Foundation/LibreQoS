@@ -320,26 +320,47 @@ pub fn attach_xdp_and_tc_to_interface(
         // Ensure no lingering XDP programs before loading/attaching
         let _ = unload_xdp_from_interface(interface_name);
 
-        // If running in libxdp mode, mark `xdp_prog` as non-autoload BEFORE
-        // skeleton load. Skeleton's default auto-load would install xdp_prog
-        // as BPF_PROG_TYPE_XDP, which cannot then be wrapped in a libxdp
-        // dispatcher (sub-programs need BPF_PROG_TYPE_EXT, and the kernel
-        // refuses to change a loaded program's type). With autoload off,
-        // libxdp owns xdp_prog's lifecycle and loads it as EXT during attach.
-        let attach_mode_for_autoload = lqos_config::load_config()
+        // Branch on attach mode. Each path has different load ordering:
+        //
+        // * Raw mode: skeleton load → bpf_xdp_attach. Same as upstream.
+        // * Libxdp mode: SKIP skeleton load entirely. libxdp's
+        //   xdp_program__attach internally calls bpf_object__load AFTER
+        //   bpf_program__set_attach_target. The set_attach_target call
+        //   refuses to run if the bpf_object is already loaded (libbpf
+        //   enforces this — the freplace attach point must be configured
+        //   before the kernel sees the program). So in libxdp mode the
+        //   skeleton load is replaced by libxdp's own load-during-attach.
+        let attach_mode = lqos_config::load_config()
             .ok()
             .as_ref()
             .map(|c| c.xdp_attach_mode)
             .unwrap_or_default();
-        if matches!(
-            attach_mode_for_autoload,
-            lqos_config::XdpAttachMode::Libxdp { .. }
-        ) {
-            crate::libxdp::disable_xdp_prog_autoload(skeleton);
-        }
 
-        load_kernel(skeleton)?;
-        attach_xdp_dispatch(skeleton, interface_index, interface_name)?;
+        match attach_mode {
+            lqos_config::XdpAttachMode::Raw => {
+                load_kernel(skeleton)?;
+                let prog_fd = bpf::bpf_program__fd((*skeleton).progs.xdp_prog);
+                attach_xdp_best_available(interface_index, prog_fd, interface_name)?;
+            }
+            lqos_config::XdpAttachMode::Libxdp { priority } => {
+                // Mark xdp_prog as non-autoload so libxdp owns its load and
+                // can install it as BPF_PROG_TYPE_EXT (a freplace sub-program
+                // of the dispatcher rather than a top-level XDP program).
+                crate::libxdp::disable_xdp_prog_autoload(skeleton);
+                // attach_via_libxdp wraps the bpf_object's "xdp" section,
+                // calls set_attach_target (must run on UNLOADED object),
+                // then loads + attaches via dispatcher. The bpf_object's
+                // OTHER programs (TC progs, ringbufs, maps) get loaded as
+                // part of bpf_object__load too — so tc_attach_egress below
+                // still finds valid FDs.
+                crate::libxdp::attach_via_libxdp(
+                    skeleton,
+                    interface_index,
+                    interface_name,
+                    priority,
+                )?;
+            }
+        }
         skeleton
     };
 
@@ -505,46 +526,6 @@ pub fn attach_xdp_and_tc_to_interface(
     }
 
     Ok(skeleton)
-}
-
-/// Dispatch XDP attachment based on the configured `xdp_attach_mode`.
-///
-/// * `XdpAttachMode::Raw` (default, historical behavior): forwards to
-///   [`attach_xdp_best_available`], which calls `bpf_xdp_attach` directly
-///   (HW → DRV → SKB → no-flags fallback). The XDP program owns the
-///   interface exclusively.
-///
-/// * `XdpAttachMode::Libxdp { priority }`: wraps the loaded program with
-///   libxdp and attaches it via the libxdp dispatcher so other XDP programs
-///   can compose on the same interface. See `crate::libxdp::attach_via_libxdp`.
-///
-/// If the config can't be loaded, falls back to `Raw` (matches the historical
-/// behavior — when lqos.conf is absent or malformed, libxdp mode can't be
-/// requested, so raw is the safe default).
-///
-/// # Safety
-/// Caller must pass a valid `skeleton` returned by `lqos_kern_open` +
-/// `lqos_kern_load`. The skeleton must outlive the attached program.
-unsafe fn attach_xdp_dispatch(
-    skeleton: *mut lqos_kern,
-    interface_index: u32,
-    iface_name: &str,
-) -> Result<()> {
-    use lqos_config::XdpAttachMode;
-    let mode = lqos_config::load_config()
-        .ok()
-        .as_ref()
-        .map(|c| c.xdp_attach_mode)
-        .unwrap_or_default();
-    match mode {
-        XdpAttachMode::Raw => unsafe {
-            let prog_fd = bpf::bpf_program__fd((*skeleton).progs.xdp_prog);
-            attach_xdp_best_available(interface_index, prog_fd, iface_name)
-        },
-        XdpAttachMode::Libxdp { priority } => unsafe {
-            crate::libxdp::attach_via_libxdp(skeleton, interface_index, iface_name, priority)
-        },
-    }
 }
 
 /// Safety: Direct calls to C functions
