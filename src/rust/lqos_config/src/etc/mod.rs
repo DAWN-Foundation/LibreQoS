@@ -19,9 +19,10 @@ mod python_migration;
 pub mod test_data;
 mod v15;
 pub use v15::{
-    BridgeConfig, LazyQueueMode, QueueMode, RttThresholds, SingleInterfaceConfig, StormguardConfig,
-    StormguardStrategy, TreeguardCircuitsConfig, TreeguardConfig, TreeguardCpuConfig,
-    TreeguardCpuMode, TreeguardLinksConfig, TreeguardQooConfig, Tunables,
+    BridgeConfig, DEFAULT_LIBXDP_PRIORITY, LazyQueueMode, QueueMode, RttThresholds,
+    SingleInterfaceConfig, StormguardConfig, StormguardStrategy, TreeguardCircuitsConfig,
+    TreeguardConfig, TreeguardCpuConfig, TreeguardCpuMode, TreeguardLinksConfig,
+    TreeguardQooConfig, Tunables, XdpAttachMode,
 };
 
 static CONFIG: Lazy<ArcSwap<Option<Arc<Config>>>> = Lazy::new(|| ArcSwap::from_pointee(None));
@@ -48,6 +49,18 @@ pub fn load_config() -> Result<Arc<Config>, LibreQoSConfigError> {
 #[doc(hidden)]
 pub fn clear_cached_config() {
     CONFIG.store(None.into());
+}
+
+/// Replace the in-memory cached configuration WITHOUT writing to disk.
+///
+/// Intended for CLI flag overrides that apply only to the current process
+/// invocation (e.g., `lqosd --xdp-attach-mode=libxdp`). The on-disk
+/// `/etc/lqos.conf` is left untouched; the next `lqosd` start without the
+/// flag picks up the on-disk value.
+///
+/// Unlike `update_config`, this does NOT persist or backup. Use sparingly.
+pub fn override_cached_config(new_config: Config) {
+    CONFIG.store(Some(Arc::new(new_config)).into());
 }
 
 /// Returns the current TreeGuard CPU-mode migration notice, if an automatic upgrade rewrite
