@@ -3132,7 +3132,12 @@ fn bakery_main(rx: Receiver<BakeryCommands>, tx: Sender<BakeryCommands>) {
             let key = MappingKey { ip: ip_s, prefix };
             let cidr = mapping_key_cidr(&key);
             let previous = mapping_current.get(&key).cloned();
-            let cpu = previous.as_ref().map(|value| value.cpu).unwrap_or(0);
+            // D-37 fix: derive cpu from the target class_major (cpu = major-1)
+            // to match the multi-CPU HTB convention. Was previous.cpu.unwrap_or(0)
+            // which writes wrong cpu when the migration moves an IP across CPU roots,
+            // producing torn LPM entries (cpu=0 paired with class major=3 tc_handle).
+            let cpu = mig.class_major.saturating_sub(1) as u32;
+            let _ = previous;
 
             if let Err(error) = lqos_sys::add_ip_to_tc(&cidr, target_handle, cpu, false, 0, 0) {
                 let rollback_summary =
