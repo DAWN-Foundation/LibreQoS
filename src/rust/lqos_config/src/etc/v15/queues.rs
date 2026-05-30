@@ -66,6 +66,21 @@ pub struct QueueConfig {
 
     /// Auto-change queues to fq_codel if they are greater than or equal to X Mbps. Defaults to 1000.
     pub fast_queues_fq_codel: Option<f64>,
+
+    /// Headroom factor for CAKE's `bandwidth` parameter, expressed as a
+    /// fraction of the customer's plan rate (which HTB enforces at the
+    /// parent class). When set, the bakery emits CAKE with
+    /// `bandwidth (plan_rate × fraction) mbit` so CAKE itself becomes
+    /// the per-circuit AQM bottleneck — HTB then only catches bursts
+    /// CAKE didn't drain. Without this, CAKE attaches as
+    /// `bandwidth unlimited` and never queues, leaving all CAKE AQM
+    /// telemetry (pk_delay/av_delay/sp_delay/drops/marks/backlog/
+    /// un_flows) structurally 0 in production reads.
+    ///
+    /// Default 0.95 = 5% headroom below HTB's ceiling. Set to None
+    /// (or 0.0) to disable and fall back to legacy `bandwidth
+    /// unlimited` behavior.
+    pub cake_headroom_fraction: Option<f64>,
 }
 
 impl Serialize for QueueConfig {
@@ -94,6 +109,7 @@ impl Serialize for QueueConfig {
         state.serialize_field("lazy_expire_seconds", &self.lazy_expire_seconds)?;
         state.serialize_field("lazy_threshold_bytes", &self.lazy_threshold_bytes)?;
         state.serialize_field("fast_queues_fq_codel", &self.fast_queues_fq_codel)?;
+        state.serialize_field("cake_headroom_fraction", &self.cake_headroom_fraction)?;
         state.end()
     }
 }
@@ -116,6 +132,7 @@ struct QueueConfigCompat {
     lazy_expire_seconds: Option<u64>,
     lazy_threshold_bytes: Option<u64>,
     fast_queues_fq_codel: Option<f64>,
+    cake_headroom_fraction: Option<f64>,
 }
 
 /// Lazy queue creation modes
@@ -147,6 +164,9 @@ impl Default for QueueConfig {
             lazy_expire_seconds: Some(600), // 10 minutes default
             lazy_threshold_bytes: None,
             fast_queues_fq_codel: None,
+            // Default: CAKE bottleneck at 95% of HTB rate. Set to None to
+            // restore legacy `bandwidth unlimited` semantics.
+            cake_headroom_fraction: Some(0.95),
         }
     }
 }
@@ -177,6 +197,7 @@ impl Default for QueueConfigCompat {
             lazy_expire_seconds: defaults.lazy_expire_seconds,
             lazy_threshold_bytes: defaults.lazy_threshold_bytes,
             fast_queues_fq_codel: defaults.fast_queues_fq_codel,
+            cake_headroom_fraction: defaults.cake_headroom_fraction,
         }
     }
 }
@@ -210,6 +231,10 @@ impl<'de> Deserialize<'de> for QueueConfig {
             lazy_expire_seconds: compat.lazy_expire_seconds,
             lazy_threshold_bytes: compat.lazy_threshold_bytes,
             fast_queues_fq_codel: compat.fast_queues_fq_codel,
+            // Default to Some(0.95) when absent from the on-disk config so
+            // upgrades to this build pick up CAKE-as-AQM automatically.
+            // Set explicitly to None in lqos.conf to opt out.
+            cake_headroom_fraction: compat.cake_headroom_fraction.or(Some(0.95)),
         };
         cfg.set_queue_mode(queue_mode);
         Ok(cfg)
