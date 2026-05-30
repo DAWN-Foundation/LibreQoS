@@ -114,41 +114,6 @@ pub(crate) fn quantum(rate: u64, r2q: u64) -> String {
     quantum.to_string()
 }
 
-/// Inject `bandwidth Xmbit` into a CAKE token vector if the operator
-/// configured `cake_headroom_fraction` and the vector doesn't already
-/// contain a `bandwidth` clause. `rate` is the customer's plan rate in
-/// Mbps. Adds the tokens IN PLACE after the leading `cake` token (where
-/// `tc qdisc add ... cake bandwidth Xmbit ...` expects them).
-///
-/// When this fires, CAKE becomes the per-circuit rate enforcer and the
-/// AQM bottleneck. HTB at the parent class still ceils overall throughput
-/// but CAKE drains slightly slower, so all queue depth and drop/mark
-/// activity lands on CAKE — which is what makes the per-tin telemetry
-/// (pk_delay, av_delay, sp_delay, drops, marks, ack_drops, backlog,
-/// un_flows) carry real values in production reads.
-fn inject_cake_bandwidth(
-    tokens: &mut Vec<String>,
-    rate_mbps: f32,
-    config: &Arc<lqos_config::Config>,
-) {
-    let Some(fraction) = config.queues.cake_headroom_fraction else { return };
-    if fraction <= 0.0 || rate_mbps <= 0.0 {
-        return;
-    }
-    // Skip if not CAKE or already has an explicit bandwidth.
-    if tokens.first().map(String::as_str) != Some("cake") {
-        return;
-    }
-    if tokens.iter().any(|t| t == "bandwidth" || t == "unlimited") {
-        return;
-    }
-    let shaped_mbps = (rate_mbps as f64 * fraction).max(1.0) as u64;
-    // Insert at position 1 (right after "cake") so the tc syntax stays
-    // `cake bandwidth Xmbit <rest>`.
-    tokens.insert(1, "bandwidth".to_string());
-    tokens.insert(2, format!("{}mbit", shaped_mbps));
-}
-
 pub(crate) fn sqm_rate_fixup(rate: f32, config: &Arc<lqos_config::Config>) -> Vec<String> {
     // If we aren't using cake, just return the sqm string
     let sqm = &config.queues.default_sqm;
@@ -157,7 +122,6 @@ pub(crate) fn sqm_rate_fixup(rate: f32, config: &Arc<lqos_config::Config>) -> Ve
     }
 
     let mut result = sqm_as_vec(config);
-    inject_cake_bandwidth(&mut result, rate, config);
 
     // If we are using cake, we need to fixup the rate
     // Based on: 1 MTU is 1500 bytes, or 12,000 bits.
@@ -229,7 +193,6 @@ pub(crate) fn sqm_tokens_for(
                     base.push("120ms".to_string());
                 }
             }
-            inject_cake_bandwidth(&mut base, rate, config);
             base
         }
         Some(_) => sqm_rate_fixup(rate, config), // defensive fallback
