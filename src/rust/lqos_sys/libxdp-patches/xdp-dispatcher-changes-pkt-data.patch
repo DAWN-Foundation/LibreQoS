@@ -1,0 +1,15 @@
+--- /home/dawn/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libxdp-sys-0.2.4+1.6.0/xdp-tools/lib/libxdp/xdp-dispatcher.c.in	2006-07-24 03:21:28.000000000 +0200
++++ /tmp/libxdp-sys-patched/xdp-tools/lib/libxdp/xdp-dispatcher.c.in	2026-06-12 15:45:40.069609079 +0200
+@@ -35,6 +35,12 @@
+ 
+         if (!ctx)
+           return XDP_ABORTED;
++        /* dawn: mark stub as changes_pkt_data (runtime no-op) so kernel
++         * >=6.13 allows freplace by extensions that modify packet data.
++         * Without this the verifier rejects with: "Extension program
++         * changes packet data, while original does not". */
++        volatile int adj = bpf_xdp_adjust_meta(ctx, 0);
++        (void)adj;
+         return ret;
+ }
+ ')

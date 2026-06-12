@@ -1,5 +1,7 @@
 #include "wrapper.h"
 #include "common/maximums.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 struct lqos_kern * lqos_kern_open() {
     return lqos_kern__open();
@@ -15,6 +17,13 @@ extern __u64 max_tracker_ips() {
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
 {
+ /* Default: silent (historic behavior). Set LQOSD_LIBBPF_DEBUG=1 to surface
+  * libbpf's messages — critically the kernel VERIFIER LOG on failed program
+  * loads, which is otherwise swallowed (cost us the kernel-6.17 EXT-load
+  * diagnosis: "Failed to load program xdp_prog: Invalid argument" with no why). */
+ if (getenv("LQOSD_LIBBPF_DEBUG")) {
+  return vfprintf(stderr, format, args);
+ }
  return 0;
 }
 
